@@ -1,0 +1,147 @@
+# langkah 1:instal library
+!pip install dlib opencv-python matplotlib
+
+# langkah 2 : unduh model deteksi wajah (landmark)
+import urllib.request
+url = "http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2"
+urllib.request.urlretrieve(url, "shape_predictor_68_face_landmarks.dat.bz2")
+
+# Ekstrak file .bz2
+import bz2
+with bz2.open("shape_predictor_68_face_landmarks.dat.bz2", "rb") as f_in:
+    with open("shape_predictor_68_face_landmarks.dat", "wb") as f_out:
+        f_out.write(f_in.read())
+
+# langkah 3: impor library yang diperlukan
+import cv2
+import dlib
+import numpy as np
+from google.colab import files #import librari untuk google colab upload file
+import matplotlib.pyplot as plt
+
+# masukin deteksi wajah dan deteksi bentuk
+detector = dlib.get_frontal_face_detector()
+predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+
+# masuk fungsi untuk hitung jarak euclidean 
+def euclidean_distance(pt1, pt2):
+    return np.linalg.norm(np.array(pt1) - np.array(pt2))
+
+# masuk fungsi untuk ekstrak fitur geometri dari wajah dan memvisualkan titik koordinat 
+def extract_geometric_features(image_path):
+    image = cv2.imread(image_path)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 100, 200)  # menerapkan dekteksi tepi Canny
+
+    faces = detector(gray)
+    for face in faces:
+        landmarks = predictor(gray, face)
+
+        # ekstrak titik poin di wajah 
+        mata_kiri = (landmarks.part(36).x, landmarks.part(36).y)
+        mata_kanan  = (landmarks.part(45).x, landmarks.part(45).y)
+        mata_kiri_tengah = (landmarks.part(39).x, landmarks.part(39).y)
+        mata_kanan_tengah  = (landmarks.part(42).x, landmarks.part(42).y)
+        mulut_kiri = (landmarks.part(48).x, landmarks.part(48).y)
+        mulut_kanan = (landmarks.part(54).x, landmarks.part(54).y)
+        hidung_atas = (landmarks.part(27).x, landmarks.part(27).y)
+        hidung_bawah  = (landmarks.part(33).x, landmarks.part(33).y)
+
+        # Plot gambar dan titik landmark dengan koordinat
+        plt.figure(figsize=(6, 6))
+        plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+        points = [mata_kiri, mata_kanan, mata_kiri_tengah, mata_kanan_tengah, mulut_kiri, mulut_kanan, hidung_atas, hidung_bawah]
+
+        # Plot setiap titik dan tambahkan teks dengan koordinatnya
+        for point in points:
+            plt.scatter(*point, c='blue')
+            plt.text(point[0], point[1], f'({point[0]}, {point[1]})', color='red', fontsize=8, ha='right')
+
+        plt.title(f"titik poin untuk {image_path}")
+        plt.axis('off')
+        plt.show()
+
+        # hitung jarak
+        m1 = euclidean_distance(mata_kiri, mata_kanan)
+        m2 = euclidean_distance (mata_kiri_tengah, mata_kanan_tengah)
+        mb1 = euclidean_distance(mata_kanan, mulut_kanan)
+        mb2 = euclidean_distance(mata_kiri, mulut_kiri)
+        b = euclidean_distance (mulut_kanan, mulut_kiri)
+        th = euclidean_distance (hidung_atas, hidung_bawah)
+        lh = euclidean_distance((landmarks.part(31).x, landmarks.part(31).y),
+                                (landmarks.part(35).x, landmarks.part(35).y))
+
+        # hitung setiap parameter
+        mb = (mb1 + mb2) / 2
+        z1 = m2 / m1
+        z2 = b / m1
+        z3 = b / mb
+        z4 = mb / m1
+        z5 = th / lh
+        z6 = lh / b
+        z7 = lh / m1
+        z8 = th / mb
+
+        # nilaireturn untuk fitur vektor termasuk nilai z 
+        return z2, z5, z8
+
+# langkah 4 : upload gambar 
+print("Upload 5 gambar wajah untuk diuji :")
+uploaded = files.upload()
+
+# langkah 5: ekstrak fitur dari tiap gambar dan hasilnya 
+features = {}
+for image_name in uploaded.keys():
+    z2, z5, z8 = extract_geometric_features(image_name)
+    features[image_name] = {'z2': z2, 'z5': z5, 'z8': z8}
+
+# tampilan ekstrak fitur untuk setiap gambar 
+for image_name, feature_values in features.items():
+    print(f"Fitur untuk {image_name}: z2 = {feature_values['z2']}, z5 = {feature_values['z5']}, z8 = {feature_values['z8']}")
+
+# langkah 6 : hitung euclidean untuk jarak  antara wajah 
+def calculate_similarity(features):
+    similarity_matrix = np.zeros((len(features), len(features)))
+    image_names = list(features.keys())
+
+    for i in range(len(image_names)):
+        for j in range(len(image_names)):
+            if i != j:
+                # hitung euclidean fitur jarak antara vektor 
+                feature1 = np.array([features[image_names[i]]['z2'], features[image_names[i]]['z5'], features[image_names[i]]['z8']])
+                feature2 = np.array([features[image_names[j]]['z2'], features[image_names[j]]['z5'], features[image_names[j]]['z8']])
+                similarity_matrix[i][j] = euclidean_distance(feature1, feature2)
+
+    return similarity_matrix, image_names
+
+# buat nilai matrix kemiripan 
+similarity_matrix, image_names = calculate_similarity(features)
+
+# tampilin matrik kemirippan 
+print("Nilai matrik Euclidean untuk kemiripan :")
+#print(" ", "\t".join(image_names))
+for i, row in enumerate(similarity_matrix):
+    print(image_names[i], "\t", "\t".join(f"{dist:.2f}" for dist in row))
+
+# langkah 7 : plot z2-z5 dan z2-z8 
+plt.figure(figsize=(12, 5))
+
+# z2 vs z5
+plt.subplot(1, 2, 1)
+plt.scatter([f['z2'] for f in features.values()], [f['z5'] for f in features.values()], color='blue')
+plt.title('z2 vs z5')
+plt.xlabel('z2')
+plt.ylabel('z5')
+plt.grid()
+
+# z2 vs z8
+plt.subplot(1, 2, 2)
+plt.scatter([f['z2'] for f in features.values()], [f['z8'] for f in features.values()], color='green')
+plt.title('z2 vs z8')
+plt.xlabel('z2')
+plt.ylabel('z8')
+plt.grid()
+
+plt.tight_layout()
+plt.show()
